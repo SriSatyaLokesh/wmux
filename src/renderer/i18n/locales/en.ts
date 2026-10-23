@@ -549,6 +549,13 @@ export const en = {
   'settings.terminalPanel.oscTitleTabs': 'Use the window title as the tab label',
   'settings.terminalPanel.oscTitleTabsHint':
     'Label a terminal tab with the window title its program sets — Claude Code announces the conversation title this way. A tab you renamed yourself always keeps its name. Turn this off if your shell sets the title to its full path.',
+  'settings.terminalPanel.mouseSection': 'Mouse',
+  'settings.terminalPanel.rightClick': 'Right-click',
+  'settings.terminalPanel.rightClick.copyPaste': 'Copy selection, otherwise paste',
+  'settings.terminalPanel.rightClick.paste': 'Always paste',
+  'settings.terminalPanel.rightClick.off': 'Do nothing',
+  'settings.terminalPanel.rightClickHint':
+    'Right-click in a terminal to copy or paste, as in Windows Terminal. In apps that use the mouse (vim, tmux), the click goes to the app — hold Shift to use the clipboard.',
   'settings.terminalPanel.scrollbackSection': 'Scrollback',
   'settings.terminalPanel.scrollbackLines': 'Scrollback lines',
   'settings.terminalPanel.touchSection': 'Touch',
