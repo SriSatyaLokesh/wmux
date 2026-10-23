@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import { QuickLaunchProfile, SavedLayout } from '../../shared/types';
 import { INDEX_MODIFIER_CHOICES, IndexModifiers, reconcileIndexModifiers } from '../utils/index-shortcuts';
 import { bindingsEqual } from '../utils/shortcut-binding';
+import type { RightClickMode } from '../utils/terminal-right-click';
 import type { WorkspaceLayout } from './split-utils';
 import {
   Language,
@@ -674,6 +675,13 @@ export interface TerminalPrefs {
    * arrow-key branch, the mouse wheel and the fling are not affected.
    */
   touchPanGain: number;
+  /**
+   * Right-click inside a terminal (#2): copy the selection or paste, as in
+   * Windows Terminal (`copyPaste`), always paste, or nothing. An app with
+   * mouse tracking on gets the click unless Shift is held. See
+   * utils/terminal-right-click.ts.
+   */
+  rightClick: RightClickMode;
   /** User-defined color schemes, addressable by name in per-pane overrides. */
   userColorSchemes: Record<string, UserColorScheme>;
 }
@@ -687,6 +695,7 @@ export const DEFAULT_TERMINAL_PREFS: TerminalPrefs = {
   scrollbackLines: 5000,
   oscTitleTabs: true,
   touchPanGain: 1,
+  rightClick: 'copyPaste',
   userColorSchemes: {},
 };
 

@@ -34,6 +34,7 @@ import { createTouchPanTracker } from '../utils/touch-pan';
 import { createFlingVelocityTracker, startFling, stepFling, type Fling } from '../utils/touch-fling';
 import { touchPanReports, wheelForward, type WheelSource } from '../utils/wheel-forward';
 import { trimTrailingWhitespace } from '../utils/copy-text';
+import { normalizeRightClickMode, rightClickAction } from '../utils/terminal-right-click';
 import { handleShiftEnter, isLetterKey, isShiftEnter } from './terminal-keys';
 import { applyKeyRemap } from '../key-remaps';
 import { claimsKeyEvent } from '../utils/shortcut-binding';
@@ -1290,11 +1291,42 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         window.wmux.remote.resolveDrop(surfaceId ?? '', Array.from(files), ev.shiftKey),
       );
     };
+    // Right-click: copy the selection or paste (#2) — see
+    // utils/terminal-right-click.ts. `contextmenu` rather than mousedown or
+    // auxclick: it fires once per gesture, after xterm has already handled the
+    // button (a mouse report, for a tracking app), and Chromium never pastes on
+    // it, so there is no second insert to cancel the way Ctrl+V has to. On the
+    // xterm container only, so the overlays above it keep their own clicks.
+    // Shift is free as a modifier here, unlike on drop: no binding uses it.
+    const onContextMenu = (ev: MouseEvent) => {
+      const action = rightClickAction({
+        mode: normalizeRightClickMode(useStore.getState().terminalPrefs.rightClick),
+        hasSelection: terminal.hasSelection(),
+        mouseTracking: !!surfaceId && isMouseTracking(surfaceMouseModes.get(surfaceId)),
+        shiftKey: ev.shiftKey,
+      });
+      if (action === 'passthrough') return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (action === 'copy') {
+        // Trimmed like Ctrl+C: ConPTY pads lines with real spaces (#102).
+        const selection = trimTrailingWhitespace(terminal.getSelection());
+        if (selection) navigator.clipboard.writeText(selection).catch(() => { /* nothing copied */ });
+        terminal.clearSelection();
+        try { terminal.focus(); } catch { /* no-op */ }
+        return;
+      }
+      // The SAME resolver as Ctrl+V, so a right-click means exactly what it
+      // does: bracketed paste, image/file paste, scp for an ssh pane (#195).
+      finishInsertion(window.wmux.remote.resolvePaste(surfaceId ?? ''));
+    };
     dropHost.addEventListener('dragover', onDragOver);
     dropHost.addEventListener('drop', onDrop);
+    dropHost.addEventListener('contextmenu', onContextMenu);
     cleanupFnsRef.current.push(() => {
       dropHost.removeEventListener('dragover', onDragOver);
       dropHost.removeEventListener('drop', onDrop);
+      dropHost.removeEventListener('contextmenu', onContextMenu);
     });
 
     // Korean/CJK IME reliability fix.

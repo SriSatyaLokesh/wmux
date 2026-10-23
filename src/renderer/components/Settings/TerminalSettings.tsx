@@ -4,6 +4,7 @@ import { useT } from '../../i18n';
 import { UserColorScheme } from '../../store/settings-slice';
 import { backdropCaps } from '../../utils/backdrop-caps';
 import { normalizeTouchPanGain, TOUCH_PAN_GAIN_MAX, TOUCH_PAN_GAIN_MIN } from '../../utils/wheel-forward';
+import { normalizeRightClickMode } from '../../utils/terminal-right-click';
 import type { ThemeConfig } from '../../../shared/types';
 
 /** First family of a CSS font stack, unquoted — used to match the picker. */
@@ -417,6 +418,28 @@ export default function TerminalSettings() {
         {t(
           'settings.terminalPanel.oscTitleTabsHint',
           'Label a terminal tab with the window title its program sets — Claude Code announces the conversation title this way. A tab you renamed yourself always keeps its name. Turn this off if your shell sets the title to its full path.',
+        )}
+      </p>
+
+      <div className="settings-divider" />
+      <h3 className="settings-section-title">{t('settings.terminalPanel.mouseSection', 'Mouse')}</h3>
+
+      <div className="settings-row">
+        <label className="settings-label">{t('settings.terminalPanel.rightClick', 'Right-click')}</label>
+        <select
+          className="settings-select"
+          value={terminalPrefs.rightClick}
+          onChange={(e) => setTerminalPrefs({ rightClick: normalizeRightClickMode(e.target.value) })}
+        >
+          <option value="copyPaste">{t('settings.terminalPanel.rightClick.copyPaste', 'Copy selection, otherwise paste')}</option>
+          <option value="paste">{t('settings.terminalPanel.rightClick.paste', 'Always paste')}</option>
+          <option value="off">{t('settings.terminalPanel.rightClick.off', 'Do nothing')}</option>
+        </select>
+      </div>
+      <p className="settings-hint">
+        {t(
+          'settings.terminalPanel.rightClickHint',
+          'Right-click in a terminal to copy or paste, as in Windows Terminal. In apps that use the mouse (vim, tmux), the click goes to the app — hold Shift to use the clipboard.',
         )}
       </p>
 
