@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import { QuickLaunchProfile, SavedLayout } from '../../shared/types';
 import { INDEX_MODIFIER_CHOICES, IndexModifiers, reconcileIndexModifiers } from '../utils/index-shortcuts';
 import { bindingsEqual } from '../utils/shortcut-binding';
+import type { BellStyle } from '../utils/terminal-bell';
 import type { WorkspaceLayout } from './split-utils';
 import {
   Language,
@@ -674,6 +675,12 @@ export interface TerminalPrefs {
    * arrow-key branch, the mouse wheel and the fling are not affected.
    */
   touchPanGain: number;
+  /**
+   * What a bell does in a pane the user can see (#1): flash the pane, play a
+   * soft local beep, or nothing. Off-screen bells are not affected — they
+   * follow `notificationPrefs.bellNotify`. See utils/terminal-bell.ts.
+   */
+  bellStyle: BellStyle;
   /** User-defined color schemes, addressable by name in per-pane overrides. */
   userColorSchemes: Record<string, UserColorScheme>;
 }
@@ -687,6 +694,7 @@ export const DEFAULT_TERMINAL_PREFS: TerminalPrefs = {
   scrollbackLines: 5000,
   oscTitleTabs: true,
   touchPanGain: 1,
+  bellStyle: 'visual',
   userColorSchemes: {},
 };
 
@@ -704,6 +712,12 @@ export interface NotificationPrefs {
   agentInputNotify: boolean;
   /** Notify when an in-pane agent (Claude Code) finishes its turn / Stop hook (issue #53). */
   agentStopNotify: boolean;
+  /**
+   * A bell in a pane the user cannot see — background tab, inactive
+   * workspace, unfocused window — raises a notification (the #53 fallback).
+   * On-screen bells never do; see `terminalPrefs.bellStyle`.
+   */
+  bellNotify: boolean;
 }
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
@@ -716,6 +730,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   customSoundName: null,
   agentInputNotify: true,
   agentStopNotify: true,
+  bellNotify: true,
 };
 
 // ─── Browser settings ─────────────────────────────────────────────────────────

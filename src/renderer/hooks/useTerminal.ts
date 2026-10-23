@@ -34,6 +34,8 @@ import { createTouchPanTracker } from '../utils/touch-pan';
 import { createFlingVelocityTracker, startFling, stepFling, type Fling } from '../utils/touch-fling';
 import { touchPanReports, wheelForward, type WheelSource } from '../utils/wheel-forward';
 import { trimTrailingWhitespace } from '../utils/copy-text';
+import { bellAction, normalizeBellStyle } from '../utils/terminal-bell';
+import { playBellSound } from '../notification-sound';
 import { handleShiftEnter, isLetterKey, isShiftEnter } from './terminal-keys';
 import { applyKeyRemap } from '../key-remaps';
 import { claimsKeyEvent } from '../utils/shortcut-binding';
@@ -217,6 +219,25 @@ function applyInsertion(
   if (!result.text) return;
   term.paste(result.text);
   try { term.focus(); } catch { /* no-op */ }
+}
+
+/**
+ * The visual bell (#1): a class on the xterm container whose ::after overlay
+ * fades out. Removing and re-adding the class (with a forced reflow between)
+ * restarts the animation, so a second bell mid-flash still reads as one.
+ */
+function flashBell(host: HTMLElement | null): void {
+  if (!host) return;
+  host.classList.remove('terminal-pane__container--bell');
+  void host.offsetWidth;
+  host.classList.add('terminal-pane__container--bell');
+  // Matched by name: animationend bubbles, and xterm's own children animate.
+  const done = (ev: AnimationEvent) => {
+    if (ev.animationName !== 'terminal-bell-flash') return;
+    host.removeEventListener('animationend', done);
+    host.classList.remove('terminal-pane__container--bell');
+  };
+  host.addEventListener('animationend', done);
 }
 
 /**
@@ -828,6 +849,9 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
   qwenSessionIdRef.current = qwenSessionId;
   const ompSessionIdRef = useRef<string | undefined>(ompSessionId);
   ompSessionIdRef.current = ompSessionId;
+  // Read by the bell handler (#1), whose closure outlives every render.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   // Subscribe to relevant settings so changes apply live.
   const prefs = useStore((s) => s.terminalPrefs);
@@ -1384,20 +1408,36 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
       return true;
     });
 
-    // Terminal bell (\x07) fallback (issue #53): many in-pane CLI agents —
-    // including Claude Code's default "I'm waiting for you" signal — ring the
-    // bell rather than emitting an OSC sequence or firing a hook. Surface it as
-    // a notification, throttled so a burst of bells (e.g. shell tab-completion
-    // with no match) doesn't flood the user.
+    // Terminal bell (\x07). Many in-pane CLI agents — including Claude Code's
+    // default "I'm waiting for you" signal — ring the bell rather than emitting
+    // an OSC sequence or firing a hook, so an OFF-screen bell is a notification
+    // (issue #53). An ON-screen bell is a shell's typing feedback far more often
+    // than not, and gets local feedback only (#1) — see utils/terminal-bell.ts.
+    // Only the notification is throttled, so a burst of bells (tab-completion
+    // with no match) cannot flood the user; the flash and beep answer every
+    // keypress, as a real terminal's bell does.
     let lastBellAt = 0;
     terminal.onBell(() => {
-      const now = Date.now();
-      if (now - lastBellAt < 3000) return;
-      lastBellAt = now;
-      window.wmux.notification.fire({
-        surfaceId: ptyIdRef.current || '',
-        text: t('terminal.bell', 'Terminal bell'),
+      const state = useStore.getState();
+      const action = bellAction({
+        visible: visibleRef.current,
+        windowFocused: document.hasFocus(),
+        bellStyle: normalizeBellStyle(state.terminalPrefs.bellStyle),
+        bellNotify: state.notificationPrefs.bellNotify,
       });
+      if (action === 'flash') {
+        flashBell(terminalRef.current);
+      } else if (action === 'beep') {
+        playBellSound();
+      } else if (action === 'notify') {
+        const now = Date.now();
+        if (now - lastBellAt < 3000) return;
+        lastBellAt = now;
+        window.wmux.notification.fire({
+          surfaceId: ptyIdRef.current || '',
+          text: t('terminal.bell', 'Terminal bell'),
+        });
+      }
     });
 
     // Prompt boundaries from a plain shell, and the scroll listener that lets

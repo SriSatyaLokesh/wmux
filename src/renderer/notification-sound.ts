@@ -76,6 +76,29 @@ export function playNotificationSound(): void {
   previewNotificationSound(sound);
 }
 
+// The on-screen bell's own element (#1): the pop at a third of the chime's
+// volume, and separate from `audioEls` so a bell never changes the volume of
+// a notification that picked 'pop', or cuts one off mid-play.
+let bellEl: HTMLAudioElement | null = null;
+
+/**
+ * The soft local beep for `terminalPrefs.bellStyle === 'audible'`. Ignores
+ * `notificationPrefs.sound` on purpose: that is the OFF-screen alert, and
+ * setting it to None must not silence the typing feedback, or vice versa.
+ */
+export function playBellSound(): void {
+  try {
+    if (!bellEl) {
+      bellEl = new Audio(popUrl);
+      bellEl.volume = 0.15;
+    }
+    bellEl.currentTime = 0;
+    bellEl.play().catch(() => {});
+  } catch {
+    // Decode/playback failure is non-fatal.
+  }
+}
+
 /**
  * Subscribe to the main process' `notification:play-sound` signal, fired once
  * for every notification (toast/flash/ring) so the chime stays in sync with

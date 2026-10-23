@@ -331,6 +331,7 @@ export const en = {
   'settings.notifications.aiAgentsSection': 'AI agents',
   'settings.notifications.agentInputNotify': 'Notify when agent needs input',
   'settings.notifications.agentStopNotify': 'Notify when agent finishes its turn',
+  'settings.notifications.bellNotify': 'Notify on a terminal bell in a background pane',
   'settings.notifications.soundSection': 'Sound',
   'settings.notifications.sound': 'Notification sound',
   'settings.notifications.preview': 'Preview',
@@ -549,6 +550,13 @@ export const en = {
   'settings.terminalPanel.oscTitleTabs': 'Use the window title as the tab label',
   'settings.terminalPanel.oscTitleTabsHint':
     'Label a terminal tab with the window title its program sets — Claude Code announces the conversation title this way. A tab you renamed yourself always keeps its name. Turn this off if your shell sets the title to its full path.',
+  'settings.terminalPanel.bellSection': 'Bell',
+  'settings.terminalPanel.bellStyle': 'Terminal bell',
+  'settings.terminalPanel.bellStyle.visual': 'Flash the pane',
+  'settings.terminalPanel.bellStyle.audible': 'Soft beep',
+  'settings.terminalPanel.bellStyle.none': 'Silent',
+  'settings.terminalPanel.bellStyleHint':
+    'What a bell does in a pane you can see — shells ring it on Backspace at an empty prompt or a Tab with no match. A bell in a background tab, another workspace or while wmux is in the background raises a notification instead (Settings → Notifications).',
   'settings.terminalPanel.scrollbackSection': 'Scrollback',
   'settings.terminalPanel.scrollbackLines': 'Scrollback lines',
   'settings.terminalPanel.touchSection': 'Touch',

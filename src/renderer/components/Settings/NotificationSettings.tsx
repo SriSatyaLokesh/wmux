@@ -96,6 +96,16 @@ export default function NotificationSettings() {
         />
       </div>
 
+      <div className="settings-row">
+        <label className="settings-label">{t('settings.notifications.bellNotify', 'Notify on a terminal bell in a background pane')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={notificationPrefs.bellNotify}
+          onChange={(e) => setNotificationPrefs({ bellNotify: e.target.checked })}
+        />
+      </div>
+
       <div className="settings-divider" />
       <h3 className="settings-section-title">{t('settings.notifications.soundSection', 'Sound')}</h3>
 

@@ -4,6 +4,7 @@ import { useT } from '../../i18n';
 import { UserColorScheme } from '../../store/settings-slice';
 import { backdropCaps } from '../../utils/backdrop-caps';
 import { normalizeTouchPanGain, TOUCH_PAN_GAIN_MAX, TOUCH_PAN_GAIN_MIN } from '../../utils/wheel-forward';
+import { normalizeBellStyle } from '../../utils/terminal-bell';
 import type { ThemeConfig } from '../../../shared/types';
 
 /** First family of a CSS font stack, unquoted — used to match the picker. */
@@ -417,6 +418,28 @@ export default function TerminalSettings() {
         {t(
           'settings.terminalPanel.oscTitleTabsHint',
           'Label a terminal tab with the window title its program sets — Claude Code announces the conversation title this way. A tab you renamed yourself always keeps its name. Turn this off if your shell sets the title to its full path.',
+        )}
+      </p>
+
+      <div className="settings-divider" />
+      <h3 className="settings-section-title">{t('settings.terminalPanel.bellSection', 'Bell')}</h3>
+
+      <div className="settings-row">
+        <label className="settings-label">{t('settings.terminalPanel.bellStyle', 'Terminal bell')}</label>
+        <select
+          className="settings-select"
+          value={terminalPrefs.bellStyle}
+          onChange={(e) => setTerminalPrefs({ bellStyle: normalizeBellStyle(e.target.value) })}
+        >
+          <option value="visual">{t('settings.terminalPanel.bellStyle.visual', 'Flash the pane')}</option>
+          <option value="audible">{t('settings.terminalPanel.bellStyle.audible', 'Soft beep')}</option>
+          <option value="none">{t('settings.terminalPanel.bellStyle.none', 'Silent')}</option>
+        </select>
+      </div>
+      <p className="settings-hint">
+        {t(
+          'settings.terminalPanel.bellStyleHint',
+          'What a bell does in a pane you can see — shells ring it on Backspace at an empty prompt or a Tab with no match. A bell in a background tab, another workspace or while wmux is in the background raises a notification instead (Settings → Notifications).',
         )}
       </p>
 
