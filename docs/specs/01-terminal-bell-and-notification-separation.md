@@ -1,194 +1,171 @@
-# Technical Specification: Terminal Bell and On-Screen vs Off-Screen Notification Separation
+# Spec 01 — Terminal bell: local feedback on-screen, a notification only off-screen
 
-- **Feature / Bugfix Area**: Terminal Bell (`\x07`), Notification Architecture, Audio Feedback
-- **Target Version**: 2.39.0
-- **Authors**: wmux Engineering Team
-- **Status**: Draft / Ready for Implementation
-
----
-
-## 1. Executive Summary & Problem Statement
-
-### 1.1 Context & Background
-In issue #53, terminal bell handling was introduced as a fallback mechanism for CLI coding agents (such as Claude Code) that emit ASCII BEL (`\x07` or `\a`) when waiting for human input or permission. The implementation added an `onBell` handler in [`src/renderer/hooks/useTerminal.ts`](file:///D:/professional/code/learn/wmux/src/renderer/hooks/useTerminal.ts#L1387-L1401) that calls `window.wmux.notification.fire(...)`.
-
-### 1.2 The Core Problem
-Under everyday terminal usage, standard interactive shells and command-line programs routinely emit `\x07` to signal ordinary user input boundaries or minor errors:
-- Pressing `Left Arrow` when the cursor is already at column 0 of a prompt line (in Bash/Zsh Readline or PowerShell PSReadLine).
-- Pressing `Backspace` on an empty command line.
-- Pressing `Tab` for autocomplete when no matching candidates exist.
-- Typing unhandled keys or hitting limits in Vi/Vim normal mode.
-
-Because `useTerminal.ts` currently treats every `terminal.onBell()` as a high-severity global notification event, wmux responds by:
-1. Triggering an OS Windows desktop toast notification popup ([`notificationManager.showToast`](file:///D:/professional/code/learn/wmux/src/main/ipc-handlers.ts#L846)).
-2. Flashing the Windows taskbar ([`notificationManager.flashTaskbar`](file:///D:/professional/code/learn/wmux/src/main/ipc-handlers.ts#L854)).
-3. Playing the global loud notification audio chime via IPC `notification:play-sound` ([`playNotificationSound`](file:///D:/professional/code/learn/wmux/src/renderer/notification-sound.ts#L73)).
-4. Adding an unread entry to the titlebar notification bell drawer ([`addNotification`](file:///D:/professional/code/learn/wmux/src/renderer/App.tsx#L223)).
-
-### 1.3 User Impact
-When actively typing in a terminal, accidentally pressing Left Arrow or Backspace triggers a loud chime, an OS toast overlaying the user's workspace, a flashing taskbar, and an in-app notification count. This constant barrage of false alarms irritates users, leading them to disable all sounds entirely in Settings (`notificationPrefs.sound = 'none'`).
-
-Consequently, when an actual critical event occurs—such as a background agent in another workspace stopping for permission, a long-running build failing, or an off-screen surface needing attention—the user receives no sound and misses the event, defeating wmux's core value proposition ("never hunt for the one that's waiting on you").
+- **Issue**: SriSatyaLokesh/wmux#1
+- **Area**: terminal bell (`BEL`, `\x07`), notification chokepoint, Settings → Terminal / Notifications
+- **Status**: ready for implementation
+- **Related upstream**: amirlehmam/wmux#53 (introduced the bell → notification fallback), #32 / #39 (notification sound)
 
 ---
 
-## 2. Core Concepts: On-Screen vs Off-Screen
+## 1. Problem
 
-To permanently resolve this friction, wmux must establish a clean architectural separation between **On-Screen** interactions and **Off-Screen** notifications:
+`useTerminal.ts` treats every `terminal.onBell()` as a full notification:
 
-| Dimension | On-Screen (In-Focus / Active) | Off-Screen (Background / Inactive) |
-| :--- | :--- | :--- |
-| **Definition** | The event occurs in a surface that is currently **visible**, within the **currently active workspace**, while the wmux window **has OS focus**. | The event occurs in a background workspace, a hidden tab in a pane, or when the wmux window is **minimized / blurred**. |
-| **User Presence** | The user is actively looking at or typing in this exact surface. | The user is looking elsewhere (another pane, another workspace, or another app like VS Code/browser). |
-| **OS Desktop Toast** | **Never**. (User is already looking at the pane). | **Allowed** (if `notificationPrefs.toast` is enabled). |
-| **Taskbar Flash** | **Never**. | **Allowed** (if window is unfocused and `taskbarFlash` enabled). |
-| **Notification Drawer Badge** | Only for explicit agent task completion/approval messages, never for terminal bells (`\x07`). | **Logged** with surface/workspace jump link. |
-| **Audio Feedback** | **On-Screen Sound Profile**: Subtle click/pop, visual flash, or silenced; independent of off-screen sound. | **Off-Screen Alert Sound Profile**: Chime, Ping, Marimba, or Custom high-priority sound. |
-
----
-
-## 3. User Stories
-
-### Story 1: Smooth Interactive Shell Typing
-> *As a developer* working in PowerShell or Bash inside wmux,  
-> *When I* press the Left Arrow at the start of the line or hit Backspace on an empty line,  
-> *I want* the terminal to either remain silent or give a subtle audible/visual cue,  
-> *So that* I do not get startled by loud system chimes or interrupted by OS toasts while typing.
-
-### Story 2: Distinct Off-Screen Agent Alerting
-> *As an AI developer* orchestrating Claude Code or Grok across 4 workspaces,  
-> *When* an agent in Workspace 3 finishes a run or halts for tool permission while I am working in Workspace 1,  
-> *I want* a distinct, clear off-screen audio chime and notification badge,  
-> *So that* I immediately know an off-screen task requires my attention without getting distracted while typing in Workspace 1.
-
-### Story 3: Independent Sound & Bell Configuration
-> *As a user*,  
-> *I want* to configure the on-screen terminal bell behavior (audible subtle beep, visual flash, or none) independently from the off-screen notification sound,  
-> *So that* I can keep notifications enabled for background agents without suffering terminal bell noise.
-
----
-
-## 4. Architectural Analysis & Proposed Design
-
-```mermaid
-flowchart TD
-    subgraph TerminalEvent["Terminal Event Source"]
-        BEL["Terminal Bell (\x07) emitted by shell/app"]
-        OSC["OSC 9 / 99 / 777 or Agent Hook"]
-    end
-
-    subgraph Evaluation["Screen Context Evaluation"]
-        CheckFocus{"Is surface active AND workspace active AND window focused?"}
-    end
-
-    subgraph OnScreenFlow["On-Screen Handling"]
-        OS_CheckBell{"Is it a raw terminal bell?"}
-        OS_BellAction["Apply Terminal Bell Mode:<br/>- None (silent)<br/>- Visual flash<br/>- Subtle click/pop sound"]
-        OS_Toast["Suppress OS Toast & Taskbar Flash"]
-    end
-
-    subgraph OffScreenFlow["Off-Screen Handling"]
-        Off_Action["Trigger Full Off-Screen Alert:<br/>- Off-Screen Notification Sound<br/>- In-App Notification Drawer Log<br/>- OS Toast (if enabled)<br/>- Taskbar Flash (if window blurred)"]
-    end
-
-    BEL --> CheckFocus
-    OSC --> CheckFocus
-
-    CheckFocus -- "Yes (On-Screen)" --> OS_CheckBell
-    OS_CheckBell -- "Yes (\x07)" --> OS_BellAction
-    OS_CheckBell -- "No (Agent Msg)" --> OS_Toast
-
-    CheckFocus -- "No (Off-Screen)" --> Off_Action
+```ts
+// src/renderer/hooks/useTerminal.ts — the bell fallback added in #53
+let lastBellAt = 0;
+terminal.onBell(() => {
+  const now = Date.now();
+  if (now - lastBellAt < 3000) return;          // 3 s per-terminal throttle
+  lastBellAt = now;
+  window.wmux.notification.fire({ surfaceId: ptyIdRef.current || '', text: t('terminal.bell', 'Terminal bell') });
+});
 ```
 
-### 4.1 Changes in `src/renderer/hooks/useTerminal.ts`
-1. **Context Check Helper**:
-   Evaluate whether the surface is currently on-screen:
-   ```typescript
-   function isSurfaceOnScreen(surfaceId: string | undefined): boolean {
-     if (!surfaceId) return false;
-     if (!document.hasFocus()) return false;
-     const state = useStore.getState();
-     const activeWs = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-     if (!activeWs) return false;
-     // Check if surfaceId belongs to the active workspace split tree and is currently active in its pane
-     return isSurfaceActiveInWorkspace(activeWs.root, surfaceId);
-   }
-   ```
-2. **Refactored `terminal.onBell()`**:
-   - If `isSurfaceOnScreen(surfaceId)` is true:
-     - Check `terminalPrefs.bellStyle` (`'none' | 'audible' | 'visual'`).
-     - If `'visual'`: trigger a CSS flash on `.terminal-pane__container` (standard visual bell).
-     - If `'audible'`: play the configured on-screen subtle bell sound (e.g. `'pop'` or a short 800Hz beep synthesized with Web Audio API).
-     - **Do NOT** call `window.wmux.notification.fire()`.
-   - If `isSurfaceOnScreen(surfaceId)` is false (the terminal is in a background workspace or background tab):
-     - Check `notificationPrefs.bellNotifyBackground` (default `true`).
-     - Fire a notification with contextual text: e.g. `t('terminal.bellBackground', 'Terminal bell in {workspace}')`.
+`notification.fire` lands on the `NOTIFICATION_FIRE` handler in `src/main/ipc-handlers.ts`, which **unconditionally**:
 
-### 4.2 Changes in `src/renderer/store/settings-slice.ts`
-1. Extend `TerminalPrefs`:
-   ```typescript
-   export interface TerminalPrefs {
-     // ... existing fields ...
-     /** Terminal bell style for on-screen/focused terminal: 'none' | 'audible' | 'visual' */
-     bellStyle: 'none' | 'audible' | 'visual';
-     /** Sound profile for on-screen terminal bell: 'subtle' | 'system' | 'none' */
-     bellSound: 'subtle' | 'pop' | 'none';
-   }
-   ```
-2. Extend `NotificationPrefs`:
-   ```typescript
-   export interface NotificationPrefs {
-     // ... existing fields ...
-     /** Off-screen sound for background workspaces/agents */
-     sound: 'default' | 'chime' | 'ping' | 'marimba' | 'pop' | 'custom' | 'none';
-     /** On-screen in-app notification sound */
-     onScreenSound: 'pop' | 'subtle' | 'none';
-     /** Whether terminal bell in background surfaces triggers off-screen notifications */
-     bellNotifyBackground: boolean;
-   }
-   ```
+1. shows an OS toast (`notificationManager.showToast`),
+2. flashes the taskbar — only when the window is *not* focused (`NotificationManager.flashTaskbar` checks `isFocused()`),
+3. sends `notification:play-sound` back to the renderer, which plays `notificationPrefs.sound` (`notification-sound.ts`).
 
-### 4.3 Changes in `src/renderer/notification-sound.ts`
-- Separate audio playback channels:
-  - `playNotificationSound(context: 'onscreen' | 'offscreen')`
-  - When `context === 'onscreen'`, respect `notificationPrefs.onScreenSound` (defaults to `'pop'`, lightweight and non-intrusive).
-  - When `context === 'offscreen'`, play `notificationPrefs.sound` (defaults to `'default'` chime).
-- Add synthetic Web Audio API fallback for terminal bell beep (`playSubtleBell()`), avoiding asset load delays.
+Shells ring the bell as ordinary typing feedback: Backspace on an empty line, Left arrow at column 0, Tab with no completion, Esc in vi mode. So in the pane the user is typing in, a slip of the finger produces an OS toast plus the notification chime (at most once per 3 s). Users then set the sound to *None*, and that also silences the alerts wmux exists to deliver: a background agent waiting for input, or a long command that finished in another workspace.
 
-### 4.4 Changes in `src/main/ipc-handlers.ts`
-- Update `IPC_CHANNELS.NOTIFICATION_FIRE` payload to carry `context?: 'onscreen' | 'offscreen'` or `isBell?: boolean`.
-- Suppress `notificationManager.showToast` if the originating window is already focused and the notification is flagged as `onscreen`.
+### What the original draft got wrong (corrected here)
 
----
+| Draft claim | Actual behaviour |
+|---|---|
+| The bell adds an entry to the titlebar notification drawer | It does not. Only `fireNotification` in `App.tsx` calls `addNotification`; the bell handler calls `notification.fire` directly. |
+| The taskbar flashes on every bell | `flashTaskbar` already does nothing while the window is focused. |
+| "OS toast (if `notificationPrefs.toast` is enabled)" | **`toast` and `taskbarFlash` are never read by main.** They are persisted to settings.json and shown in Settings → Notifications, but `NOTIFICATION_FIRE` ignores both. (`taskbarFlash` is honoured only by `useBlockedAlert` in `App.tsx`.) This is a bug in its own right and is in scope (Part B). |
 
-## 5. Acceptance Criteria
+## 2. Reproduction
 
-- [ ] **AC-1 (No Toast/Flash on Typing)**: Pressing `Left Arrow` at column 0 or `Backspace` on an empty prompt line in Bash, Zsh, or PowerShell in a focused terminal never shows an OS toast and never flashes the Windows taskbar.
-- [ ] **AC-2 (No Drawer Clutter on Typing)**: Normal shell bells in a focused terminal never add entries to the title bar notification bell list.
-- [ ] **AC-3 (Configurable On-Screen Bell)**: Settings > Terminal contains a "Terminal Bell" configuration option with options: `Audible (Subtle)`, `Visual (Flash)`, and `Silent (None)`.
-- [ ] **AC-4 (Reliable Off-Screen Alerting)**: When a terminal or agent in an inactive workspace or background tab emits a bell or completes a turn, a proper off-screen notification fires (sound chime, taskbar flash if window is unfocused, and in-app notification panel entry).
-- [ ] **AC-5 (Independent Sound Settings)**: Setting on-screen bell to `None` does NOT disable off-screen agent notifications. Setting off-screen sound to `Chime` does not cause typing in the active pane to chime.
-- [ ] **AC-6 (Visual Bell Animation)**: When `bellStyle` is set to `visual`, an on-screen bell smoothly flashes the terminal pane border/background without audio.
+1. Run wmux with default settings and open a PowerShell or bash pane.
+2. With the cursor on an empty prompt, press Backspace.
+3. **Actual**: a Windows toast reading "Terminal bell" appears and the notification chime plays.
+4. **Expected**: no toast and no chime. At most a subtle local cue in the pane.
 
----
+## 3. Design
 
-## 6. Implementation Checklist & File Touched
+### 3.1 The rule
 
-1. [`src/renderer/store/settings-slice.ts`](file:///D:/professional/code/learn/wmux/src/renderer/store/settings-slice.ts):
-   - Add `bellStyle` and `bellSound` to `TerminalPrefs` and defaults.
-   - Add `onScreenSound` and `bellNotifyBackground` to `NotificationPrefs` and defaults.
-2. [`src/renderer/hooks/useTerminal.ts`](file:///D:/professional/code/learn/wmux/src/renderer/hooks/useTerminal.ts):
-   - Implement `isSurfaceOnScreen` check.
-   - Separate on-screen visual/subtle bell from background notification fire in `terminal.onBell`.
-3. [`src/renderer/notification-sound.ts`](file:///D:/professional/code/learn/wmux/src/renderer/notification-sound.ts):
-   - Implement distinct on-screen subtle bell sound / Web Audio generator.
-   - Support `context` parameter for sound playback.
-4. [`src/renderer/components/Settings/TerminalSettings.tsx`](file:///D:/professional/code/learn/wmux/src/renderer/components/Settings/TerminalSettings.tsx):
-   - Add UI controls for Terminal Bell mode (`Audible`, `Visual`, `Silent`).
-5. [`src/renderer/components/Settings/NotificationSettings.tsx`](file:///D:/professional/code/learn/wmux/src/renderer/components/Settings/NotificationSettings.tsx):
-   - Add UI controls separating On-Screen vs Off-Screen notification sounds.
-6. [`src/renderer/styles/terminal.css`](file:///D:/professional/code/learn/wmux/src/renderer/styles/terminal.css):
-   - Add `.terminal-pane--bell-flash` keyframe animation for visual bell mode.
-7. [`tests/terminal-bell.test.ts`](file:///D:/professional/code/learn/wmux/tests/):
-   - Add unit tests validating that focused on-screen bells do not dispatch `notification:fire`.
+A bell is **on-screen** when the user can see the pane it rang in:
+
+```
+onScreen = visible && document.hasFocus()
+```
+
+- `visible` is already passed to `useTerminal` by `PaneWrapper`: it is `isActiveTab && isWorkspaceActive`, so it is false for a background tab and for any pane in an inactive workspace. No store walk and no new split-tree helper is needed. Mirror it into a ref, as the hook does for its other props, so the long-lived `onBell` closure reads the current value.
+- `document.hasFocus()` is false when wmux is minimised or another app is in front.
+
+| | On-screen | Off-screen |
+|---|---|---|
+| Behaviour | `terminalPrefs.bellStyle`: `visual` (flash the pane), `audible` (soft local beep), or `none` | Today's full notification (toast, chime, taskbar flash when unfocused), gated by `notificationPrefs.bellNotify` |
+| OS toast | never | if `notificationPrefs.toast` (Part B) |
+| Notification chime | never | `notificationPrefs.sound` |
+
+A visible pane that does **not** have keyboard focus (the other half of a split) counts as on-screen. The user can see it, and with the default `visual` style the flash on that pane is the cue. This keeps an agent ringing in the neighbouring split from being missed, without a toast.
+
+### 3.2 Pure decision + thin driver (repo convention)
+
+Put the decision in a pure module so it is unit-testable without xterm or a DOM, the same shape as `wheel-forward.ts`, `touch-pan.ts` and `close-guard.ts`:
+
+```ts
+// src/renderer/utils/terminal-bell.ts
+export type BellStyle = 'visual' | 'audible' | 'none';
+export type BellAction = 'flash' | 'beep' | 'notify' | 'ignore';
+
+export function bellAction(input: {
+  visible: boolean;          // useTerminal's `visible` prop
+  windowFocused: boolean;    // document.hasFocus()
+  bellStyle: BellStyle;      // terminalPrefs.bellStyle
+  bellNotify: boolean;       // notificationPrefs.bellNotify
+}): BellAction {
+  if (input.visible && input.windowFocused) {
+    return input.bellStyle === 'visual' ? 'flash' : input.bellStyle === 'audible' ? 'beep' : 'ignore';
+  }
+  return input.bellNotify ? 'notify' : 'ignore';
+}
+```
+
+The driver in `useTerminal.ts` replaces the body of `terminal.onBell`:
+
+- `flash`: add a `terminal-pane--bell` class to `terminalRef.current` and remove it on `animationend`, so a second bell restarts the animation.
+- `beep`: play the bundled `pop.wav` at a low volume (about 0.15). Add a small exported `playBellSound()` to `notification-sound.ts` that reuses `getAudio()`. Do not add a Web Audio synthesiser or a new asset.
+- `notify`: the existing `notification.fire` call, unchanged.
+- Keep the 3 s throttle, but **only on `notify`**. A local flash or beep should answer every keypress, the way a real terminal's does.
+
+### 3.3 Part B — honour `toast` / `taskbarFlash` in main
+
+In the `NOTIFICATION_FIRE` handler in `ipc-handlers.ts`, read `loadSettings()['wmux-notification-prefs']` at fire time. This is the established pattern for `confirmAppClose`, `gpuWatchdog` and `sessionSnapshotMinutes`: the renderer's `persist()` writes settings.json synchronously, so no new IPC is needed. Skip `showToast` when `toast === false` and `flashTaskbar` when `taskbarFlash === false`. A missing key means an install that predates the feature and gets today's behaviour (both on). Keep the decision pure and tested (for example `notificationEffects(prefs) → { toast, flash }`).
+
+This also applies to OSC 9 / 99 / 777, `wmux notify` and agent-hook notifications. That is the intended effect: it makes the existing toggles do what their labels say.
+
+### 3.4 Settings
+
+`src/renderer/store/settings-slice.ts`:
+
+```ts
+// TerminalPrefs
+/** What a bell in a pane you can see does. Off-screen bells follow notificationPrefs.bellNotify. */
+bellStyle: 'visual' | 'audible' | 'none';     // default 'visual'
+
+// NotificationPrefs
+/** A bell in a background tab / inactive workspace / unfocused window raises a notification (#53 behaviour). */
+bellNotify: boolean;                          // default true
+```
+
+Both are new fields, so `{ ...DEFAULTS, ...stored }` fills them in for existing installs and no migration is needed.
+
+- `TerminalSettings.tsx`: a "Terminal bell" select (Visual flash / Soft beep / Silent).
+- `NotificationSettings.tsx`, "AI agents" section: a "Notify on terminal bell in background panes" toggle, next to `agentInputNotify` / `agentStopNotify`.
+- Optional: `~/.wmux/config.toml` `[terminal] bell-style = "visual"`, parsed in `src/main/user-config.ts` (see `touch-pan-gain`) and applied in `applyUserConfigTerminal` in `App.tsx`.
+- i18n: add the new keys to `src/renderer/i18n/locales/en.ts`. Other locales fall back to English. Translations are welcome but not required.
+
+### 3.5 CSS
+
+`src/renderer/styles/terminal.css`: a short (about 150 ms) `terminal-pane--bell` keyframe that tints the container's inset outline or background. It must not move layout: no border width, padding or flow sibling. A flow sibling resizes the box without firing the ResizeObserver, the #82 trap described in CLAUDE.md. Respect `prefers-reduced-motion` with a static tint and no animation.
+
+## 4. Out of scope
+
+- A separate "on-screen sound" for agent notifications (`onScreenSound` in the draft). Agent notifications already go through hooks and their own prefs. Splitting their sound is a separate proposal.
+- Changing what OSC 9 / 99 / 777 or agent hooks do when on-screen.
+- Per-workspace or per-pane bell settings.
+
+## 5. Acceptance criteria
+
+- [ ] **AC-1** In a focused, visible pane, Backspace on an empty prompt (pwsh, bash, cmd) shows no OS toast and plays no notification chime.
+- [ ] **AC-2** With `bellStyle = visual` (the default), that bell flashes the pane without shifting layout. With `audible` it plays the soft beep. With `none` nothing happens.
+- [ ] **AC-3** A bell in a background tab, in an inactive workspace, or while wmux is unfocused still raises the notification (toast, chime, taskbar flash when unfocused), exactly as today.
+- [ ] **AC-4** With `bellNotify = false`, off-screen bells raise nothing. Agent hooks and OSC notifications are unaffected.
+- [ ] **AC-5** Setting `notificationPrefs.sound = none` does not change on-screen bell feedback, and `bellStyle = none` does not silence off-screen alerts.
+- [ ] **AC-6** (Part B) Turning off *Show toast notifications* stops every wmux toast. Turning off *Taskbar flash* stops the flash on `NOTIFICATION_FIRE`.
+- [ ] **AC-7** `npm test` and `npm run lint` pass.
+
+## 6. Test plan
+
+**Unit** (Vitest, `tests/unit/`):
+
+- `terminal-bell.test.ts`: the full `bellAction` truth table (visible × windowFocused × bellStyle × bellNotify).
+- `notification-effects.test.ts`: the main-side pref gate, including missing or corrupt keys falling back to "on".
+
+**Manual** (Windows, `npm run dev`):
+
+1. Backspace on an empty prompt in pwsh, bash and cmd, under each `bellStyle`.
+2. `Start-Sleep 5; [char]7` (or `sleep 5; printf '\a'`) in a pane, then switch workspace, switch tab, or alt-tab away before it fires. The notification should appear.
+3. Toggle *Show toast notifications* off and run `wmux notify hi`. No toast should appear.
+
+## 7. Files touched
+
+| File | Change |
+|---|---|
+| `src/renderer/utils/terminal-bell.ts` | **new**: pure `bellAction` |
+| `src/renderer/hooks/useTerminal.ts` | `visible` ref, new `onBell` driver |
+| `src/renderer/notification-sound.ts` | `playBellSound()` |
+| `src/renderer/store/settings-slice.ts` | `bellStyle`, `bellNotify` + defaults |
+| `src/renderer/components/Settings/TerminalSettings.tsx` | bell style select |
+| `src/renderer/components/Settings/NotificationSettings.tsx` | background-bell toggle |
+| `src/renderer/styles/terminal.css` | `terminal-pane--bell` animation |
+| `src/main/ipc-handlers.ts` (+ small pure helper) | honour `toast` / `taskbarFlash` |
+| `src/renderer/i18n/locales/en.ts` | new strings |
+| `tests/unit/terminal-bell.test.ts`, `tests/unit/notification-effects.test.ts` | **new** |
