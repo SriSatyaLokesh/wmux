@@ -38,6 +38,7 @@ import { readCodeFile, writeCodeFile } from './code-file';
 import { getExplorerRoot, forgetExplorerRoot } from './explorer-roots';
 import { sessionWindows, toRestorePayload, restoreAnswerFor } from './session-windows';
 import { loadSettings, saveSetting } from './settings-store';
+import { notificationEffects } from './notification-effects';
 import { stampAgentSessionIds } from './agent-session-persistence';
 import { readConsent, updateConsent } from './agent-integration';
 import { handleAgentStateV2 } from './agent-state-rpc';
@@ -842,15 +843,18 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
 
   ipcMain.on(IPC_CHANNELS.NOTIFICATION_FIRE, (_event, data: { surfaceId: string; text: string; title?: string }) => {
     const window = BrowserWindow.fromWebContents(_event.sender);
-    // Show toast
-    notificationManager.showToast(data.title || 'wmux', data.text, () => {
-      if (window && !window.isDestroyed()) {
-        window.focus();
-        window.webContents.send('notification:focus-surface', data.surfaceId);
-      }
-    });
-    // Flash taskbar
-    if (window && !window.isDestroyed()) {
+    // The Settings toggles for both, which this handler used to ignore (#1).
+    const effects = notificationEffects(loadSettings()['wmux-notification-prefs']);
+    if (effects.toast) {
+      notificationManager.showToast(data.title || 'wmux', data.text, () => {
+        if (window && !window.isDestroyed()) {
+          window.focus();
+          window.webContents.send('notification:focus-surface', data.surfaceId);
+        }
+      });
+    }
+    // Flash taskbar (a no-op while the window is focused)
+    if (effects.taskbarFlash && window && !window.isDestroyed()) {
       notificationManager.flashTaskbar(window);
     }
     // Ask the renderer to play the notification sound. The main process can't

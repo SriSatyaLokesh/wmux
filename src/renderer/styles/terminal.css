@@ -26,6 +26,28 @@
   touch-action: none;
 }
 
+/* Visual bell (#1). An absolutely positioned overlay rather than a border or a
+   background change: a border would resize the box xterm measures, and the
+   container's own background is painted UNDER the canvas, where it cannot be
+   seen. Positioned against .terminal-pane (the container has no position of its
+   own), above the renderer and decorations, and never hit-testable. Under
+   prefers-reduced-motion, global.css shortens it to an instant, which still
+   fires the animationend that removes the class. */
+.terminal-pane__container--bell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--ui-accent-rgb), 0.16);
+  pointer-events: none;
+  z-index: 15;
+  animation: terminal-bell-flash 180ms ease-out forwards;
+}
+
+@keyframes terminal-bell-flash {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 /* IME composition (issue #301). xterm paints the in-progress composition as a
    flat #000/#FFF block; utils/ime-composition.ts redraws it in the theme's
    colours (inline, read off the live theme) with the IME's caret or selected
